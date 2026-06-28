@@ -1,0 +1,34 @@
+services:
+  # Backend API Service
+  - type: web
+    name: amnesia-backend
+    env: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: python -m uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: PORT
+        value: 10000
+
+  # Frontend UI Static Site
+  - type: web
+    name: amnesia-frontend
+    env: static
+    buildCommand: cd frontend && npm install && npm run build
+    publishPath: frontend/dist
+    headers:
+      - path: /*
+        headers:
+          - key: Cache-Control
+            value: no-cache
+    routes:
+      # Rewrite rule to proxy API calls from frontend to backend.
+      # Replace the destination URL with your actual deployed backend service URL.
+      - type: rewrite
+        source: /api/*
+        destination: https://amnesia-backend.onrender.com/api/*
