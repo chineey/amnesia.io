@@ -5,7 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from backend.app.database import AsyncSessionLocal, is_mock_db, mock_decay_memories
 from backend.app.models import EpisodicMemory
 
-logger = logging.getLogger("mnemo.scheduler")
+logger = logging.getLogger("amnesia.scheduler")
 
 scheduler = AsyncIOScheduler()
 

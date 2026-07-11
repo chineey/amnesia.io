@@ -4,15 +4,17 @@ import uuid
 from backend.app.evaluator import run_evaluation_sequence
 
 async def cli_log_callback(msg_type: str, message: str):
+    encoding = sys.stdout.encoding or 'utf-8'
+    safe_message = message.encode(encoding, errors='replace').decode(encoding)
     if msg_type == "log":
-        print(message)
+        print(safe_message)
     elif msg_type == "progress":
-        print(f"[Progress: {message}%]")
+        print(f"[Progress: {safe_message}%]")
     elif msg_type == "result":
-        print(f"\nFinal Result: {message}")
+        print(f"\nFinal Result: {safe_message}")
 
 async def main():
-    print("Mnemo Evaluation Harness CLI")
+    print("amnesia.io Evaluation Harness CLI")
     print("=============================")
     eval_user_id = uuid.uuid4()
     print(f"Running evaluation with User ID: {eval_user_id}")

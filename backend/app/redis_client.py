@@ -3,7 +3,7 @@ import logging
 from typing import List, Dict, Any
 from backend.app.config import settings
 
-logger = logging.getLogger("mnemo.redis")
+logger = logging.getLogger("amnesia.redis")
 
 # Local in-memory session store fallback
 mock_sessions: Dict[str, List[str]] = {}

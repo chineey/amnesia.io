@@ -3,9 +3,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
     
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/mnemo"
-    database_url_sync: str = "postgresql://postgres:postgres@localhost:5432/mnemo"
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+    
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/amnesia"
+    database_url_sync: str = "postgresql://postgres:postgres@localhost:5432/amnesia"
     redis_url: str = "redis://localhost:6379/0"
     
     port: int = 8000

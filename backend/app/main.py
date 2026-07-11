@@ -25,7 +25,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
-logger = logging.getLogger("mnemo.main")
+logger = logging.getLogger("amnesia.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

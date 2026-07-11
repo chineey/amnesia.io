@@ -3,11 +3,12 @@ import uuid
 from datetime import datetime, timedelta
 from typing import AsyncGenerator, Dict, List, Any
 import numpy as np
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import declarative_base
 from backend.app.config import settings
 
-logger = logging.getLogger("mnemo.database")
+logger = logging.getLogger("amnesia.database")
 
 # In-memory mock database state
 USE_MOCK_DB = False
@@ -34,9 +35,12 @@ try:
             sslmode = query.pop("sslmode")[0]
             if sslmode in ("require", "verify-ca", "verify-full"):
                 connect_args["ssl"] = True
-            new_query = urlencode(query, doseq=True)
-            parsed = parsed._replace(query=new_query)
-            db_url = urlunparse(parsed)
+        if "channel_binding" in query:
+            query.pop("channel_binding")
+            
+        new_query = urlencode(query, doseq=True)
+        parsed = parsed._replace(query=new_query)
+        db_url = urlunparse(parsed)
 
     # Try to initialize Postgres engine (requires asyncpg driver)
     engine = create_async_engine(
@@ -88,7 +92,7 @@ async def init_db():
     try:
         async with engine.begin() as conn:
             # Try to create extension and tables
-            await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
             await conn.run_sync(Base.metadata.create_all)
         logger.info("PostgreSQL database successfully initialized.")
         USE_MOCK_DB = False

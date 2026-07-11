@@ -13,7 +13,7 @@ from backend.app.gemini_client import get_chat_completion, get_chat_completion_s
 from backend.app.background_workers import execute_path_a_turn_embedding, execute_path_b_session_extraction, clean_json_response
 from backend.app.scheduler import decay_episodic_memories_job
 
-logger = logging.getLogger("mnemo.evaluator")
+logger = logging.getLogger("amnesia.evaluator")
 
 async def run_evaluation_sequence(
     eval_user_id: uuid.UUID,
@@ -24,7 +24,6 @@ async def run_evaluation_sequence(
     streaming progress back via the log_fn callback.
     """
     await init_db()
-    db = None if is_mock_db() else AsyncSessionLocal()
     
     try:
         # Cleanup any existing data for this user
@@ -33,11 +32,12 @@ async def run_evaluation_sequence(
             from backend.app.database import mock_clear_memories
             mock_clear_memories(eval_user_id)
         else:
-            from sqlalchemy import delete
-            await db.execute(delete(EpisodicMemory).where(EpisodicMemory.user_id == eval_user_id))
-            await db.execute(delete(CoreProfile).where(CoreProfile.user_id == eval_user_id))
-            await db.execute(delete(User).where(User.id == eval_user_id))
-            await db.commit()
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import delete
+                await db.execute(delete(EpisodicMemory).where(EpisodicMemory.user_id == eval_user_id))
+                await db.execute(delete(CoreProfile).where(CoreProfile.user_id == eval_user_id))
+                await db.execute(delete(User).where(User.id == eval_user_id))
+                await db.commit()
         
         # -------------------------------------------------------------
         # SESSION 1: Establish Baseline
@@ -49,7 +49,13 @@ async def run_evaluation_sequence(
         await log_fn("log", f"User: {user_msg_1}")
         
         # Retrieve context (profile is empty initially)
-        context1 = await retrieve_context(eval_user_id, sess1_id, user_msg_1, db)
+        if is_mock_db():
+            context1 = await retrieve_context(eval_user_id, sess1_id, user_msg_1, None)
+        else:
+            async with AsyncSessionLocal() as db:
+                context1 = await retrieve_context(eval_user_id, sess1_id, user_msg_1, db)
+                await db.commit()
+                
         messages1 = [
             {"role": "system", "content": context1["system_prompt"]},
             {"role": "user", "content": user_msg_1}
@@ -77,9 +83,11 @@ async def run_evaluation_sequence(
             p1_profile = mock_get_or_create_profile(eval_user_id)
             await log_fn("log", f"Updated Core Profile:\n{json.dumps(p1_profile, indent=2)}")
         else:
-            profile1_result = await db.execute(select(CoreProfile).where(CoreProfile.user_id == eval_user_id))
-            p1 = profile1_result.scalar_one_or_none()
-            await log_fn("log", f"Updated Core Profile:\n{json.dumps(p1.profile if p1 else {}, indent=2)}")
+            async with AsyncSessionLocal() as db:
+                profile1_result = await db.execute(select(CoreProfile).where(CoreProfile.user_id == eval_user_id))
+                p1 = profile1_result.scalar_one_or_none()
+                profile_data = p1.profile if p1 else {}
+            await log_fn("log", f"Updated Core Profile:\n{json.dumps(profile_data, indent=2)}")
         
         # -------------------------------------------------------------
         # SESSION 2: Add Preferences & Recall Baseline
@@ -87,10 +95,16 @@ async def run_evaluation_sequence(
         sess2_id = uuid.uuid4()
         await log_fn("progress", "30")
         await log_fn("log", f"\n=== SESSION 2: Recall and Append (Session ID: {sess2_id}) ===")
-        user_msg_2 = "Hey Mnemo! What is my name and favorite programming language? Also, I've been drinking a lot of green tea lately."
+        user_msg_2 = "Hey amnesia.io! What is my name and favorite programming language? Also, I've been drinking a lot of green tea lately."
         await log_fn("log", f"User: {user_msg_2}")
         
-        context2 = await retrieve_context(eval_user_id, sess2_id, user_msg_2, db)
+        if is_mock_db():
+            context2 = await retrieve_context(eval_user_id, sess2_id, user_msg_2, None)
+        else:
+            async with AsyncSessionLocal() as db:
+                context2 = await retrieve_context(eval_user_id, sess2_id, user_msg_2, db)
+                await db.commit()
+                
         messages2 = [
             {"role": "system", "content": context2["system_prompt"]},
             {"role": "user", "content": user_msg_2}
@@ -111,9 +125,11 @@ async def run_evaluation_sequence(
             p2_profile = mock_get_or_create_profile(eval_user_id)
             await log_fn("log", f"Updated Core Profile:\n{json.dumps(p2_profile, indent=2)}")
         else:
-            profile2_result = await db.execute(select(CoreProfile).where(CoreProfile.user_id == eval_user_id))
-            p2 = profile2_result.scalar_one_or_none()
-            await log_fn("log", f"Updated Core Profile:\n{json.dumps(p2.profile if p2 else {}, indent=2)}")
+            async with AsyncSessionLocal() as db:
+                profile2_result = await db.execute(select(CoreProfile).where(CoreProfile.user_id == eval_user_id))
+                p2 = profile2_result.scalar_one_or_none()
+                profile_data = p2.profile if p2 else {}
+            await log_fn("log", f"Updated Core Profile:\n{json.dumps(profile_data, indent=2)}")
         
         # -------------------------------------------------------------
         # SESSION 3: Contradiction Resolution
@@ -124,7 +140,13 @@ async def run_evaluation_sequence(
         user_msg_3 = "Actually, I've completely switched my primary language from Python to Go. I cannot stand Python anymore! What language do I use now?"
         await log_fn("log", f"User: {user_msg_3}")
         
-        context3 = await retrieve_context(eval_user_id, sess3_id, user_msg_3, db)
+        if is_mock_db():
+            context3 = await retrieve_context(eval_user_id, sess3_id, user_msg_3, None)
+        else:
+            async with AsyncSessionLocal() as db:
+                context3 = await retrieve_context(eval_user_id, sess3_id, user_msg_3, db)
+                await db.commit()
+                
         messages3 = [
             {"role": "system", "content": context3["system_prompt"]},
             {"role": "user", "content": user_msg_3}
@@ -145,9 +167,11 @@ async def run_evaluation_sequence(
             p3_profile = mock_get_or_create_profile(eval_user_id)
             await log_fn("log", f"Updated Core Profile (Verify Python replaced by Go):\n{json.dumps(p3_profile, indent=2)}")
         else:
-            profile3_result = await db.execute(select(CoreProfile).where(CoreProfile.user_id == eval_user_id))
-            p3 = profile3_result.scalar_one_or_none()
-            await log_fn("log", f"Updated Core Profile (Verify Python replaced by Go):\n{json.dumps(p3.profile if p3 else {}, indent=2)}")
+            async with AsyncSessionLocal() as db:
+                profile3_result = await db.execute(select(CoreProfile).where(CoreProfile.user_id == eval_user_id))
+                p3 = profile3_result.scalar_one_or_none()
+                profile_data = p3.profile if p3 else {}
+            await log_fn("log", f"Updated Core Profile (Verify Python replaced by Go):\n{json.dumps(profile_data, indent=2)}")
         
         # -------------------------------------------------------------
         # SESSION 4: Time Gap and Decay Simulation
@@ -178,36 +202,45 @@ async def run_evaluation_sequence(
                 f"Remaining content previews: {[m['content'][:30] + '...' for m in rem_mems]}"
             )
         else:
-            # Find and update memories
-            update_stmt = (
-                update(EpisodicMemory)
-                .where(
-                    EpisodicMemory.user_id == eval_user_id,
-                    EpisodicMemory.content.like("%hiking%")
+            async with AsyncSessionLocal() as db:
+                update_stmt = (
+                    update(EpisodicMemory)
+                    .where(
+                        EpisodicMemory.user_id == eval_user_id,
+                        EpisodicMemory.content.like("%hiking%")
+                    )
+                    .values(last_accessed_at=twenty_days_ago)
                 )
-                .values(last_accessed_at=twenty_days_ago)
-            )
-            await db.execute(update_stmt)
-            await db.commit()
-            
+                await db.execute(update_stmt)
+                await db.commit()
+                
             # Trigger decay job
             await decay_episodic_memories_job()
             
-            # Check if the memory confidence decayed
-            memories_check = await db.execute(
-                select(EpisodicMemory).where(EpisodicMemory.user_id == eval_user_id)
-            )
-            rem_mems = memories_check.scalars().all()
+            async with AsyncSessionLocal() as db:
+                # Check if the memory confidence decayed
+                memories_check = await db.execute(
+                    select(EpisodicMemory).where(EpisodicMemory.user_id == eval_user_id)
+                )
+                rem_mems = memories_check.scalars().all()
+                rem_previews = [m.content[:30] + '...' for m in rem_mems]
+                
             await log_fn(
                 "log", 
                 f"Active episodic memory rows after decay: {len(rem_mems)}. "
-                f"Remaining content previews: {[m.content[:30] + '...' for m in rem_mems]}"
+                f"Remaining content previews: {rem_previews}"
             )
         
-        user_msg_4 = "Hi Mnemo, I'm back after a long trip. Do you remember my favorite drink?"
+        user_msg_4 = "Hi amnesia.io, I'm back after a long trip. Do you remember my favorite drink?"
         await log_fn("log", f"User: {user_msg_4}")
         
-        context4 = await retrieve_context(eval_user_id, sess4_id, user_msg_4, db)
+        if is_mock_db():
+            context4 = await retrieve_context(eval_user_id, sess4_id, user_msg_4, None)
+        else:
+            async with AsyncSessionLocal() as db:
+                context4 = await retrieve_context(eval_user_id, sess4_id, user_msg_4, db)
+                await db.commit()
+                
         messages4 = [
             {"role": "system", "content": context4["system_prompt"]},
             {"role": "user", "content": user_msg_4}
@@ -230,7 +263,13 @@ async def run_evaluation_sequence(
         user_msg_5 = "Can you summarize what you know about me (my name, job, programming language, hobbies, and drink)?"
         await log_fn("log", f"User: {user_msg_5}")
         
-        context5 = await retrieve_context(eval_user_id, sess5_id, user_msg_5, db)
+        if is_mock_db():
+            context5 = await retrieve_context(eval_user_id, sess5_id, user_msg_5, None)
+        else:
+            async with AsyncSessionLocal() as db:
+                context5 = await retrieve_context(eval_user_id, sess5_id, user_msg_5, db)
+                await db.commit()
+                
         messages5 = [
             {"role": "system", "content": context5["system_prompt"]},
             {"role": "user", "content": user_msg_5}
@@ -282,6 +321,4 @@ async def run_evaluation_sequence(
     except Exception as err:
         logger.error(f"Evaluation harness failed: {err}", exc_info=True)
         await log_fn("log", f"\n[ERROR] Simulation crashed: {err}")
-    finally:
-        if not is_mock_db() and db:
-            await db.close()
+

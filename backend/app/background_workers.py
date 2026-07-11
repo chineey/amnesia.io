@@ -10,7 +10,7 @@ from backend.app.models import CoreProfile, EpisodicMemory
 from backend.app.redis_client import get_session_history, clear_session_history
 from backend.app.gemini_client import get_embedding, get_chat_completion
 
-logger = logging.getLogger("mnemo.background")
+logger = logging.getLogger("amnesia.background")
 
 def clean_json_response(raw_text: str) -> str:
     """

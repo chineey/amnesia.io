@@ -9,7 +9,7 @@ from backend.app.redis_client import get_session_history
 from backend.app.gemini_client import get_embedding
 from backend.app.database import is_mock_db, mock_get_or_create_profile, mock_query_memories
 
-logger = logging.getLogger("mnemo.memory")
+logger = logging.getLogger("amnesia.memory")
 
 TOTAL_CAP = 800
 WORKING_MEMORY_RESERVE = 150
@@ -27,7 +27,7 @@ def assemble_system_prompt(profile_str: str, episodic_chunks: List[str]) -> str:
     Assembles the system prompt containing core profile and episodic context.
     """
     prompt = (
-        "You are Mnemo, a highly personalized AI chat assistant.\n"
+        "You are amnesia.io, a highly personalized AI chat assistant.\n"
         "Your goal is to build a living model of the user, session by session, "
         "and use that model to tailor your responses perfectly to their style, preferences, and background.\n\n"
         "=== CORE USER PROFILE ===\n"
