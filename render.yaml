@@ -1,34 +1,55 @@
 services:
-  # Backend API Service
+  # UNIFIED SINGLE-SERVICE DEPLOYMENT (Recommended)
+  # This builds the frontend React app and serves it directly from the FastAPI backend.
+  # This uses only 1 Free Web Service on Render, avoids CORS/network mismatches, and simplifies cron-job keep-alives.
   - type: web
-    name: amnesia-backend
+    name: amnesia-io
     env: python
-    buildCommand: pip install -r backend/requirements.txt
+    buildCommand: cd frontend && npm install && npm run build && cd .. && pip install -r backend/requirements.txt
     startCommand: python -m uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
       - key: DATABASE_URL
-        sync: false
+        sync: false # PostgreSQL connection string (falls back to mock mode if not set)
       - key: REDIS_URL
-        sync: false
+        sync: false # Redis connection string (falls back to mock mode if not set)
       - key: PORT
         value: 10000
 
-  # Frontend UI Static Site
-  - type: web
-    name: amnesia-frontend
-    env: static
-    buildCommand: cd frontend && npm install && npm run build
-    publishPath: frontend/dist
-    headers:
-      - path: /*
-        headers:
-          - key: Cache-Control
-            value: no-cache
-    routes:
-      # Rewrite rule to proxy API calls from frontend to backend.
-      # Replace the destination URL with your actual deployed backend service URL.
-      - type: rewrite
-        source: /api/*
-        destination: https://amnesia-backend.onrender.com/api/*
+  # OPTIONAL: MULTI-SERVICE DEPLOYMENT
+  # If you prefer to run them separately, uncomment the lines below and comment out the unified service above.
+  # Note: You will need to change the destination URL in the rewrite rule below to match your backend's actual domain.
+  #
+  # - type: web
+  #   name: amnesia-backend
+  #   env: python
+  #   buildCommand: pip install -r backend/requirements.txt
+  #   startCommand: python -m uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+  #   envVars:
+  #     - key: GEMINI_API_KEY
+  #       sync: false
+  #     - key: DATABASE_URL
+  #       sync: false
+  #     - key: REDIS_URL
+  #       sync: false
+  #     - key: PORT
+  #       value: 10000
+  #
+  # - type: web
+  #   name: amnesia-frontend
+  #   env: static
+  #   buildCommand: cd frontend && npm install && npm run build
+  #   publishPath: frontend/dist
+  #   headers:
+  #     - path: /*
+  #       headers:
+  #         - key: Cache-Control
+  #           value: no-cache
+  #   routes:
+  #     - type: rewrite
+  #       source: /api/*
+  #       destination: https://amnesia-backend.onrender.com/api/*
+

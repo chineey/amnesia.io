@@ -5,6 +5,8 @@ import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, BackgroundTasks, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -281,4 +283,11 @@ async def run_eval(request: EvalRequest):
         await task
         
     return StreamingResponse(log_stream(), media_type="text/event-stream")
+
+# Serve static frontend files if build directory exists (for single-service deployment)
+frontend_dist_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist"))
+if os.path.exists(frontend_dist_path):
+    app.mount("/", StaticFiles(directory=frontend_dist_path, html=True), name="frontend")
+else:
+    logger.warning(f"Frontend dist directory not found at {frontend_dist_path}. Static files will not be served.")
 
