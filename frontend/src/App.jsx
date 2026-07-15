@@ -40,6 +40,7 @@ export default function App() {
   const [sessionId, setSessionId] = useState(() => generateUUID());
   const [sessionCount, setSessionCount] = useState(1);
   const [activePanel, setActivePanel] = useState('chat'); // 'chat' | 'eval'
+  const [mobileSubTab, setMobileSubTab] = useState('chat'); // 'chat' | 'inspector'
 
   // Chat state
   const [messages, setMessages] = useState([]);
@@ -282,36 +283,36 @@ export default function App() {
   };
 
   return (
-    <div className="app-container" style={styles.appContainer}>
+    <div className="app-container">
       {/* Top Header Navbar */}
-      <header style={styles.header} className="glass">
-        <div style={styles.headerLeft}>
+      <header className="header glass">
+        <div className="header-left">
           <div style={styles.logoCircle}>
             <Activity size={20} color="#22d3ee" />
           </div>
           <div>
-            <h1 style={styles.brandTitle}>amnesia.io <span style={styles.betaTag}>MemoryAgent</span></h1>
-            <p style={styles.brandSubtitle}>Powered by Google Gemini & Neon</p>
+            <h1 className="brand-title">amnesia.io <span className="beta-tag">MemoryAgent</span></h1>
+            <p className="brand-subtitle">Powered by Google Gemini & Neon</p>
           </div>
         </div>
 
-        <div style={styles.headerRight}>
-          <div style={styles.statusPill}>
+        <div className="header-right">
+          <div className="status-pill">
             <span style={styles.statusDot}></span>
-            <span>Local Node Running</span>
+            <span className="status-text">Local Node Running</span>
           </div>
 
-          <div style={styles.navTabs}>
+          <div className="nav-tabs">
             <button 
               onClick={() => setActivePanel('chat')} 
-              style={{...styles.navButton, ...(activePanel === 'chat' ? styles.navButtonActive : {})}}
+              className={`nav-button ${activePanel === 'chat' ? 'active' : ''}`}
             >
               <MessageSquare size={16} />
               <span>Chat Playground</span>
             </button>
             <button 
               onClick={() => setActivePanel('eval')} 
-              style={{...styles.navButton, ...(activePanel === 'eval' ? styles.navButtonActive : {})}}
+              className={`nav-button ${activePanel === 'eval' ? 'active' : ''}`}
             >
               <Layers size={16} />
               <span>Evaluation Harness</span>
@@ -320,7 +321,7 @@ export default function App() {
 
           <button 
             onClick={handleEndSession} 
-            style={styles.actionBtnEnd} 
+            className="action-btn action-btn-end" 
             title="End current session, trigger contradiction resolution and start new session"
           >
             <LogOut size={15} />
@@ -329,7 +330,7 @@ export default function App() {
 
           <button 
             onClick={handlePurgeMemories} 
-            style={styles.actionBtnPurge} 
+            className="action-btn action-btn-purge" 
             title="Clear all stored database tables for this user"
           >
             <Trash2 size={15} />
@@ -339,25 +340,45 @@ export default function App() {
       </header>
 
       {/* Main Workspace Split Grid */}
-      <main style={styles.mainLayout}>
+      <main className="main-layout">
         {activePanel === 'chat' ? (
           <>
+            {/* Mobile Sub-tab Switcher */}
+            <div className="mobile-subtabs glass">
+              <button 
+                type="button"
+                onClick={() => setMobileSubTab('chat')} 
+                className={`mobile-subtab-btn ${mobileSubTab === 'chat' ? 'active' : ''}`}
+              >
+                <MessageSquare size={16} />
+                <span>Playground</span>
+              </button>
+              <button 
+                type="button"
+                onClick={() => setMobileSubTab('inspector')} 
+                className={`mobile-subtab-btn ${mobileSubTab === 'inspector' ? 'active' : ''}`}
+              >
+                <Database size={16} />
+                <span>Inspector</span>
+              </button>
+            </div>
+
             {/* Left: Chat Widget */}
-            <section style={styles.chatSection} className="glass">
-              <div style={styles.chatHeader}>
-                <div style={styles.chatHeaderInfo}>
+            <section className={`chat-section glass ${mobileSubTab === 'chat' ? 'mobile-visible' : 'mobile-hidden'}`}>
+              <div className="chat-header">
+                <div className="chat-header-info">
                   <MessageSquare size={18} color="#818cf8" />
                   <h3>Active Turn Stream</h3>
                   <span style={styles.sessIdText}>Session: {sessionId.slice(0, 8)}...</span>
                 </div>
-                <div style={styles.chatHeaderTip}>
+                <div className="chat-header-tip">
                   <Sparkles size={14} color="#22d3ee" />
                   <span>Gemini context updates session-by-session</span>
                 </div>
               </div>
 
               {/* Chat Thread */}
-              <div style={styles.chatMessagesContainer}>
+              <div className="chat-messages-container">
                 {messages.length === 0 ? (
                   <div style={styles.emptyChatPlaceholder}>
                     <Cpu size={48} color="#64748b" style={{marginBottom: 16}} />
@@ -374,7 +395,7 @@ export default function App() {
                       style={msg.role === 'user' ? styles.chatMsgUserRow : styles.chatMsgAssRow}
                       className="animate-slide-up"
                     >
-                      <div style={msg.role === 'user' ? styles.chatMsgUserBubble : styles.chatMsgAssBubble}>
+                      <div className={msg.role === 'user' ? "chat-msg-user-bubble" : "chat-msg-ass-bubble"}>
                         <div style={styles.bubbleHeader}>
                           <strong>{msg.role === 'user' ? 'You' : 'amnesia.io'}</strong>
                         </div>
@@ -387,7 +408,7 @@ export default function App() {
               </div>
 
               {/* Chat Form */}
-              <form onSubmit={handleSendMessage} style={styles.chatInputForm}>
+              <form onSubmit={handleSendMessage} className="chat-input-form">
                 <input
                   type="text"
                   value={inputText}
@@ -407,14 +428,14 @@ export default function App() {
             </section>
 
             {/* Right: Memory Inspector Panel */}
-            <section style={styles.inspectorSection} className="glass">
-              <div style={styles.inspectorHeader}>
+            <section className={`inspector-section glass ${mobileSubTab === 'inspector' ? 'mobile-visible' : 'mobile-hidden'}`}>
+              <div className="inspector-header">
                 <Database size={18} color="#22d3ee" />
                 <h3>Memory Inspector</h3>
                 <span style={styles.badgeProfile}>Active profile: terrawimm</span>
               </div>
 
-              <div style={styles.inspectorScroll}>
+              <div className="inspector-scroll">
                 {/* 1. Core Profile */}
                 <div style={styles.inspectCard} className="glass">
                   <div style={styles.cardHeader}>
@@ -553,8 +574,8 @@ export default function App() {
           </>
         ) : (
           /* Evaluation Harness Dashboard Panel */
-          <section style={styles.evalContainer} className="glass">
-            <div style={styles.evalHeader}>
+          <section className="eval-container glass">
+            <div className="eval-header">
               <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
                 <Layers size={24} color="#818cf8" />
                 <div>
@@ -565,7 +586,7 @@ export default function App() {
               
               <button 
                 onClick={triggerSimulation} 
-                style={styles.runSimButton} 
+                className="run-sim-button" 
                 disabled={evalRunning}
               >
                 <Play size={16} />
@@ -579,7 +600,7 @@ export default function App() {
               </div>
             )}
 
-            <div style={styles.evalTerminal}>
+            <div className="eval-terminal">
               <div style={styles.terminalHeader}>
                 <span style={styles.terminalDotRed}></span>
                 <span style={styles.terminalDotYellow}></span>
