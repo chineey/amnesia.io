@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -113,46 +114,38 @@ async def execute_path_b_session_extraction(
         new_facts = extracted_data.get("facts", [])
         new_preferences = extracted_data.get("preferences", [])
         new_events = extracted_data.get("events", [])
-        
+
+        # 3. Retrieve existing Core Profile (own short transaction, committed
+        # immediately so a first-time user's freshly-created row is visible
+        # to the write transaction later in this function).
         if is_mock_db():
             current_profile = mock_get_or_create_profile(user_id)
-            combined_facts = current_profile.get("facts", []) + new_facts
-            combined_preferences = current_profile.get("preferences", []) + new_preferences
-            combined_events = current_profile.get("events", []) + new_events
-            
-            merged_temp_profile = {
-                "facts": combined_facts,
-                "preferences": combined_preferences,
-                "events": combined_events
-            }
         else:
-            # 3. Retrieve existing Core Profile
             async with AsyncSessionLocal() as db:
                 profile_stmt = select(CoreProfile).where(CoreProfile.user_id == user_id)
                 profile_result = await db.execute(profile_stmt)
                 core_profile = profile_result.scalar_one_or_none()
-                
+
                 if not core_profile:
                     core_profile = CoreProfile(
                         user_id=user_id,
                         profile={"facts": [], "preferences": [], "events": []}
                     )
                     db.add(core_profile)
-                    await db.flush()
-                    
+
+                await db.commit()
                 current_profile = core_profile.profile
-                
-                # Combine current profile lists with new extractions
-                combined_facts = current_profile.get("facts", []) + new_facts
-                combined_preferences = current_profile.get("preferences", []) + new_preferences
-                combined_events = current_profile.get("events", []) + new_events
-                
-                merged_temp_profile = {
-                    "facts": combined_facts,
-                    "preferences": combined_preferences,
-                    "events": combined_events
-                }
-            
+
+        combined_facts = current_profile.get("facts", []) + new_facts
+        combined_preferences = current_profile.get("preferences", []) + new_preferences
+        combined_events = current_profile.get("events", []) + new_events
+
+        merged_temp_profile = {
+            "facts": combined_facts,
+            "preferences": combined_preferences,
+            "events": combined_events
+        }
+
         # 4. Run Contradiction Resolution Pass via Gemini
         contradiction_prompt = (
             "You are a profile manager. Given the user's current profile JSON "
@@ -181,62 +174,55 @@ async def execute_path_b_session_extraction(
             logger.error(f"Failed to parse resolved profile JSON: {json_err}. Keeping combined data.")
             resolved_profile = merged_temp_profile
             
+        # 5. Generate event embeddings concurrently, ahead of the write
+        # transaction, so the DB connection isn't held open across N
+        # sequential embedding API calls.
+        valid_events = [e for e in new_events if e.get("content")]
+        event_embeddings = await asyncio.gather(
+            *[get_embedding(e["content"]) for e in valid_events]
+        ) if valid_events else []
+
+        # 6. Commit the resolved profile and the new event memories in a
+        # single transaction.
         if is_mock_db():
             mock_save_profile(user_id, resolved_profile)
-            logger.info("Path B updated Core Profile successfully (Mock DB).")
-            
-            if new_events:
-                for event in new_events:
-                    event_content = event.get("content", "")
-                    event_confidence = event.get("confidence", 1.0)
-                    if not event_content:
-                        continue
-                    embedding = await get_embedding(event_content)
-                    mock_add_memory(
-                        user_id=user_id,
-                        content=event_content,
-                        embedding=embedding,
-                        confidence=event_confidence,
-                        access_count=0,
-                        source_session_id=session_id
-                    )
-                logger.info(f"Path B saved {len(new_events)} event episodic memories (Mock DB).")
+            for event, embedding in zip(valid_events, event_embeddings):
+                mock_add_memory(
+                    user_id=user_id,
+                    content=event["content"],
+                    embedding=embedding,
+                    confidence=event.get("confidence", 1.0),
+                    access_count=0,
+                    source_session_id=session_id
+                )
+            logger.info(
+                f"Path B updated Core Profile and saved {len(valid_events)} "
+                "event episodic memories (Mock DB)."
+            )
         else:
             async with AsyncSessionLocal() as db:
-                # Need to reload or fetch again because we closed previous block
                 profile_stmt = select(CoreProfile).where(CoreProfile.user_id == user_id)
                 profile_result = await db.execute(profile_stmt)
                 core_profile = profile_result.scalar_one()
-                
                 core_profile.profile = resolved_profile
-                await db.commit()
-                logger.info("Path B updated Core Profile successfully.")
-                
-            # 5. Insert events as vector-indexed Episodic Memories
-            if new_events:
-                async with AsyncSessionLocal() as db:
-                    for event in new_events:
-                        event_content = event.get("content", "")
-                        event_confidence = event.get("confidence", 1.0)
-                        if not event_content:
-                            continue
-                        
-                        # Generate embedding
-                        embedding = await get_embedding(event_content)
-                        
-                        new_memory = EpisodicMemory(
-                            user_id=user_id,
-                            content=event_content,
-                            embedding=embedding,
-                            confidence=event_confidence,
-                            access_count=0,
-                            source_session_id=session_id
-                        )
-                        db.add(new_memory)
-                    await db.commit()
-                logger.info(f"Path B saved {len(new_events)} event episodic memories.")
 
-        # 6. Clear Redis session cache so it is officially closed
+                for event, embedding in zip(valid_events, event_embeddings):
+                    db.add(EpisodicMemory(
+                        user_id=user_id,
+                        content=event["content"],
+                        embedding=embedding,
+                        confidence=event.get("confidence", 1.0),
+                        access_count=0,
+                        source_session_id=session_id
+                    ))
+
+                await db.commit()
+            logger.info(
+                f"Path B updated Core Profile and saved {len(valid_events)} "
+                "event episodic memories."
+            )
+
+        # 7. Clear Redis session cache so it is officially closed
         await clear_session_history(str(session_id))
         logger.info(f"Path B completed and Redis history cleared for session {session_id}.")
         

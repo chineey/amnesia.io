@@ -22,7 +22,7 @@ class EpisodicMemory(Base):
     __tablename__ = "episodic_memories"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     content = Column(String, nullable=False)
     embedding = Column(Vector(768), nullable=True) # 768 dimensions for Gemini text-embedding-004
     confidence = Column(Float, default=1.0, server_default=text("1.0"))

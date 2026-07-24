@@ -37,17 +37,29 @@ try:
                 connect_args["ssl"] = True
         if "channel_binding" in query:
             query.pop("channel_binding")
-            
+
         new_query = urlencode(query, doseq=True)
         parsed = parsed._replace(query=new_query)
         db_url = urlunparse(parsed)
+
+        # Neon's connection string commonly points at its PgBouncer pooler
+        # endpoint (transaction-mode pooling), which is incompatible with
+        # asyncpg's client-side prepared statement cache. Disabling it avoids
+        # intermittent "prepared statement ... does not exist" errors.
+        connect_args["statement_cache_size"] = 0
 
     # Try to initialize Postgres engine (requires asyncpg driver)
     engine = create_async_engine(
         db_url,
         echo=False,
         future=True,
-        connect_args=connect_args
+        connect_args=connect_args,
+        # Neon's free tier autosuspends the compute after a few minutes idle;
+        # pre_ping detects a stale/suspended connection and transparently
+        # reconnects instead of raising, and pool_recycle proactively retires
+        # connections before they go stale.
+        pool_pre_ping=True,
+        pool_recycle=280,
     )
     AsyncSessionLocal = async_sessionmaker(
         bind=engine,
@@ -94,6 +106,12 @@ async def init_db():
             # Try to create extension and tables
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
             await conn.run_sync(Base.metadata.create_all)
+            # HNSW index so semantic search does a real ANN lookup instead of
+            # a full table scan as episodic_memories grows.
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_episodic_memories_embedding_hnsw "
+                "ON episodic_memories USING hnsw (embedding vector_cosine_ops);"
+            ))
         logger.info("PostgreSQL database successfully initialized.")
         USE_MOCK_DB = False
     except Exception as e:

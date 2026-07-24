@@ -11,7 +11,9 @@ use_mock_redis = False
 
 try:
     import redis.asyncio as aioredis
-    redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
+    # Free-tier Redis plans cap concurrent connections; bound the client's
+    # pool instead of leaving it unbounded.
+    redis_client = aioredis.from_url(settings.redis_url, decode_responses=True, max_connections=10)
 except Exception as e:
     logger.warning(f"Failed to initialize Redis client: {e}. Falling back to in-memory session cache.")
     redis_client = None
@@ -20,27 +22,38 @@ except Exception as e:
 def get_session_key(session_id: str) -> str:
     return f"session:{session_id}:history"
 
-async def append_to_session_history(session_id: str, role: str, content: str, ttl_seconds: int = 1800):
+async def append_turns_to_session_history(session_id: str, turns: List[tuple], ttl_seconds: int = 1800):
     """
-    Appends a turn to the session history in Redis (or in-memory mock) and resets the 30-minute TTL.
+    Appends one or more (role, content) turns to the session history and resets
+    the TTL. Batched into a single pipelined round trip regardless of how many
+    turns are given, to stay light on free-tier Redis command quotas.
     """
-    message_data = json.dumps({"role": role, "content": content})
-    
     global use_mock_redis
+    messages = [json.dumps({"role": role, "content": content}) for role, content in turns]
+
     if not use_mock_redis and redis_client:
         try:
             key = get_session_key(session_id)
-            await redis_client.rpush(key, message_data)
-            await redis_client.expire(key, ttl_seconds)
+            async with redis_client.pipeline(transaction=False) as pipe:
+                pipe.rpush(key, *messages)
+                pipe.expire(key, ttl_seconds)
+                await pipe.execute()
             return
         except Exception as e:
             logger.error(f"Redis write error: {e}. Switching to in-memory mock.")
             use_mock_redis = True
-            
+
     # Fallback mock
     if session_id not in mock_sessions:
         mock_sessions[session_id] = []
-    mock_sessions[session_id].append(message_data)
+    mock_sessions[session_id].extend(messages)
+
+async def append_to_session_history(session_id: str, role: str, content: str, ttl_seconds: int = 1800):
+    """
+    Appends a single turn to the session history. See append_turns_to_session_history
+    to batch multiple turns into one round trip.
+    """
+    await append_turns_to_session_history(session_id, [(role, content)], ttl_seconds)
 
 async def get_session_history(session_id: str) -> List[Dict[str, str]]:
     """

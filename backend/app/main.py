@@ -15,7 +15,7 @@ from sqlalchemy import select, delete
 from backend.app.config import settings
 from backend.app.database import get_db, init_db, is_mock_db
 from backend.app.memory_service import retrieve_context
-from backend.app.redis_client import append_to_session_history
+from backend.app.redis_client import append_turns_to_session_history
 from backend.app.gemini_client import get_chat_completion_stream
 from backend.app.background_workers import execute_path_a_turn_embedding, execute_path_b_session_extraction
 from backend.app.scheduler import start_scheduler, shutdown_scheduler
@@ -47,11 +47,13 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Enable CORS for frontend Vite development server
+# Enable CORS for frontend Vite development server. No cookies/auth headers
+# are used, so allow_credentials stays off — that's what makes a wildcard
+# origin valid; browsers reject `allow_origins=["*"]` + `allow_credentials=True`.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, restrict this. For hackathon, allow all.
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -220,16 +222,11 @@ async def chat_stream(request: ChatRequest, background_tasks: BackgroundTasks, d
             full_response = "".join(full_response_parts)
             
             # 3. Post-stream processing
-            # A. Append this exchange to Redis (Working Memory)
-            await append_to_session_history(
+            # A. Append this exchange to Redis (Working Memory) in a single
+            # pipelined round trip instead of two separate ones.
+            await append_turns_to_session_history(
                 session_id=str(request.session_id),
-                role="user",
-                content=request.message
-            )
-            await append_to_session_history(
-                session_id=str(request.session_id),
-                role="assistant",
-                content=full_response
+                turns=[("user", request.message), ("assistant", full_response)]
             )
             
             # B. Launch Path A as background task to embed the raw turn and save it to episodic_memories
