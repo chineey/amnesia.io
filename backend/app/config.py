@@ -11,7 +11,12 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/amnesia"
     database_url_sync: str = "postgresql://postgres:postgres@localhost:5432/amnesia"
     redis_url: str = "redis://localhost:6379/0"
-    
+
+    # Signs session JWTs (issued on login) — set a long random string in
+    # production. Falls back to a fixed dev value so local/mock-mode setups
+    # work out of the box, but this must be overridden on any real deployment.
+    jwt_secret: str = "dev-insecure-jwt-secret-change-me"
+
     port: int = 8000
     host: str = "127.0.0.1"
 

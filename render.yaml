@@ -16,6 +16,8 @@ services:
         sync: false # PostgreSQL connection string (falls back to mock mode if not set)
       - key: REDIS_URL
         sync: false # Redis connection string (falls back to mock mode if not set)
+      - key: JWT_SECRET
+        generateValue: true # signs session JWTs — must be set, or every deploy invalidates existing logins
       - key: PORT
         value: 10000
 

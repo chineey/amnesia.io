@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { streamEvalRun } from '@/lib/api';
 
-export function useEvalRun({ userId, onSettled }) {
+export function useEvalRun({ onSettled }) {
   const [logs, setLogs] = useState([]);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -12,7 +12,7 @@ export function useEvalRun({ userId, onSettled }) {
     setProgress(0);
 
     try {
-      await streamEvalRun({ userId }, (event) => {
+      await streamEvalRun((event) => {
         if (event.type === 'log') {
           setLogs((prev) => [...prev, event.message]);
         } else if (event.type === 'progress') {
@@ -27,7 +27,7 @@ export function useEvalRun({ userId, onSettled }) {
       setRunning(false);
       onSettled?.();
     }
-  }, [userId, onSettled]);
+  }, [onSettled]);
 
   return { logs, running, progress, run };
 }

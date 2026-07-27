@@ -7,12 +7,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.models import User, CoreProfile, EpisodicMemory
 from backend.app.redis_client import get_session_history
 from backend.app.gemini_client import get_embedding
-from backend.app.database import is_mock_db, mock_get_or_create_profile, mock_query_memories
+from backend.app.database import (
+    is_mock_db,
+    mock_get_or_create_profile,
+    mock_query_memories,
+    mock_save_profile,
+    mock_add_memory,
+)
 
 logger = logging.getLogger("amnesia.memory")
 
 TOTAL_CAP = 800
 WORKING_MEMORY_RESERVE = 150
+# Budget for the standalone /api/context endpoint (no chat/redis involved,
+# so the full cap minus the profile can go to episodic snippets).
+CONTEXT_EPISODIC_TOKEN_CAP = 650
 
 def count_tokens(text: str) -> int:
     """
@@ -224,3 +233,134 @@ async def retrieve_context(
         "redis_history": working_history,
         "token_stats": token_stats
     }
+
+async def get_writing_context(
+    user_id: uuid.UUID,
+    query: str,
+    db: AsyncSession,
+    limit: int = 8
+) -> Dict[str, Any]:
+    """
+    Standalone retrieval for external integrations (e.g. GenPost): the Core
+    Profile plus the top semantically-relevant episodic memories for `query`,
+    with no chat session / Redis working-memory involved. Unlike
+    retrieve_context(), this returns raw data for the caller's own prompt
+    rather than an assembled system_prompt.
+    """
+    if is_mock_db():
+        profile = mock_get_or_create_profile(user_id)
+    else:
+        profile = await get_or_create_user_profile(user_id, db)
+    profile_tokens = count_tokens(json.dumps(profile))
+
+    episodic_snippets: List[str] = []
+    if query:
+        query_embedding = await get_embedding(query)
+        budget = max(CONTEXT_EPISODIC_TOKEN_CAP - profile_tokens, 0)
+
+        if is_mock_db():
+            candidates = mock_query_memories(user_id, query_embedding, limit=limit)
+            candidate_contents = [c["content"] for c in candidates]
+        else:
+            stmt = (
+                select(EpisodicMemory)
+                .where(EpisodicMemory.user_id == user_id)
+                .order_by(EpisodicMemory.embedding.cosine_distance(query_embedding))
+                .limit(limit)
+            )
+            result = await db.execute(stmt)
+            candidate_contents = [m.content for m in result.scalars().all()]
+
+        for content in candidate_contents:
+            chunk_tokens = count_tokens(content)
+            if budget - chunk_tokens < 0:
+                break
+            episodic_snippets.append(content)
+            budget -= chunk_tokens
+
+    return {
+        "core_profile": profile,
+        "episodic_snippets": episodic_snippets,
+    }
+
+async def ingest_episodic_memory(
+    user_id: uuid.UUID,
+    content: str,
+    db: AsyncSession,
+    confidence: float = 1.0,
+) -> None:
+    """
+    Directly embeds and stores a piece of text (e.g. a GenPost post the user
+    approved) as an episodic memory, bypassing the chat/session pipeline that
+    normally feeds episodic_memories.
+    """
+    embedding = await get_embedding(content)
+
+    if is_mock_db():
+        mock_add_memory(
+            user_id=user_id,
+            content=content,
+            embedding=embedding,
+            confidence=confidence,
+            access_count=0,
+            source_session_id=None,
+        )
+        return
+
+    db.add(EpisodicMemory(
+        user_id=user_id,
+        content=content,
+        embedding=embedding,
+        confidence=confidence,
+        access_count=0,
+        source_session_id=None,
+    ))
+    await db.commit()
+
+async def merge_profile_facts(
+    user_id: uuid.UUID,
+    db: AsyncSession,
+    facts: List[Dict[str, Any]] = None,
+    preferences: List[Dict[str, Any]] = None,
+    events: List[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Appends caller-supplied facts/preferences/events (e.g. onboarding answers
+    collected by GenPost — age range, occupation, voice/slang notes) onto the
+    user's Core Profile. Trusted, user-declared data, so unlike Path B's
+    chat-extraction pipeline this skips the Gemini contradiction-resolution
+    pass and de-dupes on exact content match only.
+    """
+    if is_mock_db():
+        profile = mock_get_or_create_profile(user_id)
+    else:
+        profile = await get_or_create_user_profile(user_id, db)
+
+    def _merge(existing: List[Dict[str, Any]], incoming: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not incoming:
+            return existing
+        existing_content = {item.get("content") for item in existing}
+        merged = list(existing)
+        for item in incoming:
+            content = item.get("content")
+            if content and content not in existing_content:
+                merged.append({"content": content, "confidence": item.get("confidence", 1.0)})
+                existing_content.add(content)
+        return merged
+
+    updated_profile = {
+        "facts": _merge(profile.get("facts", []), facts or []),
+        "preferences": _merge(profile.get("preferences", []), preferences or []),
+        "events": _merge(profile.get("events", []), events or []),
+    }
+
+    if is_mock_db():
+        mock_save_profile(user_id, updated_profile)
+    else:
+        stmt = select(CoreProfile).where(CoreProfile.user_id == user_id)
+        result = await db.execute(stmt)
+        core_profile = result.scalar_one()
+        core_profile.profile = updated_profile
+        await db.commit()
+
+    return updated_profile

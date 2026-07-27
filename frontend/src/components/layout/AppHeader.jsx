@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Brain, LogOut, MessageSquare, Layers, Trash2 } from 'lucide-react';
+import { Brain, Check, Copy, KeyRound, LogOut, MessageSquare, Layers, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -15,8 +15,81 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import { regenerateApiKey } from '@/lib/auth';
 
-export function AppHeader({ sessionCount, onEndSession, onPurgeMemories }) {
+function ConnectGenPostDialog({ apiKeyPrefix }) {
+  const [open, setOpen] = useState(false);
+  const [newKey, setNewKey] = useState(null);
+  const [regenerating, setRegenerating] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleRegenerate = async () => {
+    setRegenerating(true);
+    try {
+      const data = await regenerateApiKey();
+      setNewKey(data.api_key);
+      setCopied(false);
+    } catch (err) {
+      toast.error(`Failed to regenerate key: ${err.message}`);
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(newKey);
+    setCopied(true);
+  };
+
+  return (
+    <AlertDialog open={open} onOpenChange={(next) => { setOpen(next); if (!next) setNewKey(null); }}>
+      <AlertDialogTrigger
+        render={
+          <Button variant="outline" className="gap-1.5">
+            <KeyRound className="size-3.5" />
+            <span className="hidden sm:inline">Connect GenPost</span>
+          </Button>
+        }
+      />
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Connect to GenPost</AlertDialogTitle>
+          <AlertDialogDescription>
+            {newKey ? (
+              <>
+                Your new API key (shown once — copy it now):
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-border bg-black/20 px-3 py-2 font-mono text-xs break-all text-foreground">
+                  {newKey}
+                </div>
+              </>
+            ) : (
+              <>
+                Paste your API key into GenPost's Settings → Connect Amnesia.
+                {apiKeyPrefix && <> Your current key ends in <span className="font-mono text-foreground">…{apiKeyPrefix}</span>.</>}
+                {' '}Lost it? Generate a new one below (this invalidates the old one).
+              </>
+            )}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Close</AlertDialogCancel>
+          {newKey ? (
+            <AlertDialogAction onClick={handleCopy} className="gap-1.5">
+              {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+              {copied ? 'Copied' : 'Copy key'}
+            </AlertDialogAction>
+          ) : (
+            <AlertDialogAction onClick={handleRegenerate} disabled={regenerating}>
+              {regenerating ? 'Generating…' : 'Generate new key'}
+            </AlertDialogAction>
+          )}
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+export function AppHeader({ authUser, sessionCount, onEndSession, onPurgeMemories, onLogout }) {
   const [endOpen, setEndOpen] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [ending, setEnding] = useState(false);
@@ -86,6 +159,13 @@ export function AppHeader({ sessionCount, onEndSession, onPurgeMemories }) {
             <span className="sm:hidden">Eval</span>
           </TabsTrigger>
         </TabsList>
+
+        <ConnectGenPostDialog apiKeyPrefix={authUser?.api_key_prefix} />
+
+        <Button variant="ghost" onClick={onLogout} className="gap-1.5">
+          <LogOut className="size-3.5" />
+          <span className="hidden sm:inline">Log out</span>
+        </Button>
 
         <AlertDialog open={endOpen} onOpenChange={setEndOpen}>
           <AlertDialogTrigger

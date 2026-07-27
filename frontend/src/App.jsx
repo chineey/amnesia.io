@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Database, MessageSquare } from 'lucide-react';
 import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
 import { AppHeader } from '@/components/layout/AppHeader';
+import { AuthGate } from '@/components/auth/AuthGate';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { MemoryInspector } from '@/components/inspector/MemoryInspector';
 import { EvalPanel } from '@/components/eval/EvalPanel';
@@ -12,36 +13,66 @@ import { useChat } from '@/hooks/useChat';
 import { useMemoryInspector } from '@/hooks/useMemoryInspector';
 import { useEvalRun } from '@/hooks/useEvalRun';
 import { endSession as endSessionApi, purgeMemories as purgeMemoriesApi } from '@/lib/api';
+import { getToken, clearToken, getMe } from '@/lib/auth';
 import { generateUUID, cn } from '@/lib/utils';
 
 const SESSION_TEARDOWN_DELAY_MS = 3500;
 
 export default function App() {
-  const [userId] = useState(() => {
-    const saved = localStorage.getItem('amnesia_user_id');
-    if (saved) return saved;
-    const newId = generateUUID();
-    localStorage.setItem('amnesia_user_id', newId);
-    return newId;
-  });
+  // 'checking' | 'anonymous' | user object
+  const [authUser, setAuthUser] = useState('checking');
 
+  useEffect(() => {
+    if (!getToken()) {
+      setAuthUser('anonymous');
+      return;
+    }
+    getMe()
+      .then(setAuthUser)
+      .catch(() => {
+        clearToken();
+        setAuthUser('anonymous');
+      });
+  }, []);
+
+  const handleLogout = () => {
+    clearToken();
+    setAuthUser('anonymous');
+  };
+
+  if (authUser === 'checking') {
+    return <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">Loading…</div>;
+  }
+
+  if (authUser === 'anonymous') {
+    return (
+      <>
+        <AuthGate onAuthenticated={() => { getMe().then(setAuthUser).catch(() => setAuthUser('anonymous')); }} />
+        <Toaster />
+      </>
+    );
+  }
+
+  return <AuthenticatedApp authUser={authUser} onLogout={handleLogout} />;
+}
+
+function AuthenticatedApp({ authUser, onLogout }) {
   const [sessionId, setSessionId] = useState(() => generateUUID());
   const [sessionCount, setSessionCount] = useState(1);
   const [activePanel, setActivePanel] = useState('chat');
   const [mobilePane, setMobilePane] = useState('chat'); // 'chat' | 'inspector'
   const [inputText, setInputText] = useState('');
 
-  const inspector = useMemoryInspector(userId, sessionId);
+  const inspector = useMemoryInspector(sessionId);
   const chat = useChat({
-    userId,
     sessionId,
     onMetadata: inspector.setCoreProfile,
     onSettled: inspector.refresh,
   });
-  const evalRun = useEvalRun({ userId, onSettled: inspector.refresh });
+  const evalRun = useEvalRun({ onSettled: inspector.refresh });
 
   const handleEndSession = async () => {
-    await endSessionApi(userId, sessionId);
+    await endSessionApi(sessionId);
     setTimeout(() => {
       setSessionId(generateUUID());
       setSessionCount((c) => c + 1);
@@ -51,7 +82,7 @@ export default function App() {
   };
 
   const handlePurgeMemories = async () => {
-    await purgeMemoriesApi(userId);
+    await purgeMemoriesApi();
     chat.resetChat();
     inspector.reset();
   };
@@ -64,9 +95,11 @@ export default function App() {
         className="h-screen gap-4 overflow-hidden p-3 sm:p-4"
       >
         <AppHeader
+          authUser={authUser}
           sessionCount={sessionCount}
           onEndSession={handleEndSession}
           onPurgeMemories={handlePurgeMemories}
+          onLogout={onLogout}
         />
 
         <main className="min-h-0 flex-1">

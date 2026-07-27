@@ -12,4 +12,6 @@ numpy
 asyncpg==0.31.0
 google-genai
 greenlet
+bcrypt==4.1.3
+pyjwt==2.10.1
 

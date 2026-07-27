@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { streamChat } from '@/lib/api';
 
-export function useChat({ userId, sessionId, onMetadata, onSettled }) {
+export function useChat({ sessionId, onMetadata, onSettled }) {
   const [messages, setMessages] = useState([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [retrievedEpisodes, setRetrievedEpisodes] = useState([]);
@@ -17,7 +17,7 @@ export function useChat({ userId, sessionId, onMetadata, onSettled }) {
 
     let assistantResponse = '';
     try {
-      await streamChat({ userId, sessionId, message: trimmed }, (event) => {
+      await streamChat({ sessionId, message: trimmed }, (event) => {
         if (event.type === 'metadata') {
           setRetrievedEpisodes(event.retrieved_episodes);
           setTokenStats(event.token_stats);
@@ -46,7 +46,7 @@ export function useChat({ userId, sessionId, onMetadata, onSettled }) {
       setIsStreaming(false);
       onSettled?.();
     }
-  }, [userId, sessionId, isStreaming, onMetadata, onSettled]);
+  }, [sessionId, isStreaming, onMetadata, onSettled]);
 
   const resetChat = useCallback(() => {
     setMessages([]);

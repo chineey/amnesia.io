@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//tmp/**)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/)",
+      "Bash(python -m uvicorn backend.app.main:app --port 8000)",
+      "Bash(echo \"started PID $!\")",
+      "Bash(cat /tmp/backend_dev.log 2>&1)",
+      "Read(//c/Users/HP/AppData/tmp/**)",
+      "Bash(command -v chromium-cli)",
+      "Bash(npx --yes playwright --version)",
+      "Bash(node -e \"require.resolve\\('playwright'\\)\")",
+      "Bash(node -e \"require.resolve\\('playwright-core'\\)\")",
+      "Bash(mkdir -p \"/c/Users/HP/AppData/Local/Temp/claude/c--Users-HP-Documents-Projects-amnesia-io/9e34cc3e-b239-4301-b5d1-8750433928b4/scratchpad/pw\")",
+      "Read(//c/Users/HP/AppData/Local/Temp/claude/c--Users-HP-Documents-Projects-amnesia-io/9e34cc3e-b239-4301-b5d1-8750433928b4/scratchpad/**)",
+      "Bash(npm init *)"
+    ]
+  }
+}

@@ -21,6 +21,8 @@ from backend.app.background_workers import execute_path_a_turn_embedding, execut
 from backend.app.scheduler import start_scheduler, shutdown_scheduler
 from backend.app.models import EpisodicMemory, CoreProfile, User
 from backend.app.evaluator import run_evaluation_sequence
+from backend.app.auth import get_current_user_id
+from backend.app import auth_routes, integration_routes
 
 # Configure logging
 logging.basicConfig(
@@ -58,13 +60,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_routes.router)
+app.include_router(integration_routes.router)
+
 class ChatRequest(BaseModel):
-    user_id: uuid.UUID
     session_id: uuid.UUID
     message: str
 
 class EndSessionRequest(BaseModel):
-    user_id: uuid.UUID
     session_id: uuid.UUID
 
 @app.get("/api/health")
@@ -72,7 +75,7 @@ async def health_check():
     return {"status": "ok", "version": "1.0.0"}
 
 @app.get("/api/profile")
-async def get_profile(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_profile(user_id: uuid.UUID = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
     if is_mock_db():
         from backend.app.database import mock_get_or_create_profile
         return mock_get_or_create_profile(user_id)
@@ -86,7 +89,7 @@ async def get_profile(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     return core_profile.profile
 
 @app.get("/api/memories")
-async def get_memories(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_memories(user_id: uuid.UUID = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
     if is_mock_db():
         from backend.app.database import mock_get_all_memories
         memories = mock_get_all_memories(user_id)
@@ -127,7 +130,7 @@ async def get_memories(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     ]
 
 @app.delete("/api/memories")
-async def clear_all_memories(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def clear_all_memories(user_id: uuid.UUID = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
     """
     Resets both core profile and episodic memories for the user. Extremely useful for fresh testing.
     """
@@ -162,23 +165,32 @@ async def clear_all_memories(user_id: uuid.UUID, db: AsyncSession = Depends(get_
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/session/end")
-async def end_session(request: EndSessionRequest, background_tasks: BackgroundTasks):
+async def end_session(
+    request: EndSessionRequest,
+    background_tasks: BackgroundTasks,
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
     """
     Triggers Path B session extraction & contradiction resolution in the background.
     """
     # Enqueue Path B background worker
     background_tasks.add_task(
-        execute_path_b_session_extraction, 
-        user_id=request.user_id, 
+        execute_path_b_session_extraction,
+        user_id=user_id,
         session_id=request.session_id
     )
     return {
-        "status": "triggered", 
+        "status": "triggered",
         "message": "Session teardown and contradiction resolution queued in the background."
     }
 
 @app.post("/api/chat")
-async def chat_stream(request: ChatRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+async def chat_stream(
+    request: ChatRequest,
+    background_tasks: BackgroundTasks,
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
     """
     Handles turn-by-turn chat. Injects profile & episodic context, streams response,
     then updates session history (Redis) and enqueues Path A (turn-embedding) in background.
@@ -186,7 +198,7 @@ async def chat_stream(request: ChatRequest, background_tasks: BackgroundTasks, d
     try:
         # 1. Retrieve Context (Profile, Semantic Episodes, Redis history, Token cap)
         context = await retrieve_context(
-            user_id=request.user_id,
+            user_id=user_id,
             session_id=request.session_id,
             query=request.message,
             db=db
@@ -232,7 +244,7 @@ async def chat_stream(request: ChatRequest, background_tasks: BackgroundTasks, d
             # B. Launch Path A as background task to embed the raw turn and save it to episodic_memories
             background_tasks.add_task(
                 execute_path_a_turn_embedding,
-                user_id=request.user_id,
+                user_id=user_id,
                 session_id=request.session_id,
                 user_msg=request.message,
                 assistant_msg=full_response
@@ -246,22 +258,25 @@ async def chat_stream(request: ChatRequest, background_tasks: BackgroundTasks, d
         logger.error(f"Error in chat_stream endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-class EvalRequest(BaseModel):
-    user_id: uuid.UUID
-
 @app.post("/api/eval/run")
-async def run_eval(request: EvalRequest):
+async def run_eval(user_id: uuid.UUID = Depends(get_current_user_id)):
     """
     Runs the 5-session evaluation pipeline and streams log outputs back to the client in real-time.
+    Requires auth just to keep this (Gemini/Groq-cost-incurring) harness from being run by anyone
+    who finds the URL — the pipeline always operates on a disposable synthetic persona, generated
+    fresh below, never on the caller's own account, since it deletes and overwrites whatever user_id
+    it's given.
     """
+    eval_user_id = uuid.uuid4()
+
     async def log_stream():
         queue = asyncio.Queue()
-        
+
         async def log_callback(msg_type: str, message: str):
             await queue.put({"type": msg_type, "message": message})
-            
+
         # Run evaluation in background task
-        task = asyncio.create_task(run_evaluation_sequence(request.user_id, log_callback))
+        task = asyncio.create_task(run_evaluation_sequence(eval_user_id, log_callback))
         
         while not task.done() or not queue.empty():
             try:

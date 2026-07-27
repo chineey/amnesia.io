@@ -1,7 +1,7 @@
 import logging
 import uuid
 from datetime import datetime, timedelta
-from typing import AsyncGenerator, Dict, List, Any
+from typing import AsyncGenerator, Dict, List, Any, Optional
 import numpy as np
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -17,6 +17,11 @@ def is_mock_db() -> bool:
     return USE_MOCK_DB
 mock_profiles: Dict[str, Dict[str, Any]] = {}
 mock_memories: List[Dict[str, Any]] = []
+# Mock user store, keyed by user id (str). A second dict indexes the same
+# records by lowercased email so signup/login can look users up either way
+# without scanning the whole store.
+mock_users: Dict[str, Dict[str, Any]] = {}
+mock_users_by_email: Dict[str, str] = {}
 
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
@@ -112,6 +117,21 @@ async def init_db():
                 "CREATE INDEX IF NOT EXISTS ix_episodic_memories_embedding_hnsw "
                 "ON episodic_memories USING hnsw (embedding vector_cosine_ops);"
             ))
+            # Migration for already-provisioned databases: create_all above
+            # only creates brand-new tables, it won't add columns to an
+            # existing `users` table, so add the auth columns explicitly.
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR;"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR;"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_key_hash VARCHAR;"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_key_prefix VARCHAR;"))
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email_unique "
+                "ON users(email) WHERE email IS NOT NULL;"
+            ))
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_api_key_hash_unique "
+                "ON users(api_key_hash) WHERE api_key_hash IS NOT NULL;"
+            ))
         logger.info("PostgreSQL database successfully initialized.")
         USE_MOCK_DB = False
     except Exception as e:
@@ -196,6 +216,38 @@ def mock_clear_memories(user_id: uuid.UUID):
     uid_str = str(user_id)
     if uid_str in mock_profiles:
         mock_profiles[uid_str] = {"facts": [], "preferences": [], "events": []}
+
+def mock_create_user(user_id: uuid.UUID, email: str, password_hash: str, api_key_hash: str, api_key_prefix: str) -> Dict[str, Any]:
+    record = {
+        "id": user_id,
+        "email": email,
+        "password_hash": password_hash,
+        "api_key_hash": api_key_hash,
+        "api_key_prefix": api_key_prefix,
+        "created_at": datetime.utcnow(),
+    }
+    mock_users[str(user_id)] = record
+    mock_users_by_email[email.lower()] = str(user_id)
+    return record
+
+def mock_get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
+    uid = mock_users_by_email.get(email.lower())
+    return mock_users.get(uid) if uid else None
+
+def mock_get_user_by_id(user_id: uuid.UUID) -> Optional[Dict[str, Any]]:
+    return mock_users.get(str(user_id))
+
+def mock_get_user_by_api_key_hash(api_key_hash: str) -> Optional[Dict[str, Any]]:
+    for record in mock_users.values():
+        if record.get("api_key_hash") == api_key_hash:
+            return record
+    return None
+
+def mock_update_api_key(user_id: uuid.UUID, api_key_hash: str, api_key_prefix: str):
+    record = mock_users.get(str(user_id))
+    if record:
+        record["api_key_hash"] = api_key_hash
+        record["api_key_prefix"] = api_key_prefix
 
 def mock_decay_memories():
     global mock_memories
