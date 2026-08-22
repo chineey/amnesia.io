@@ -1,0 +1,23 @@
+{
+  "amnesia_api_url": "http://localhost:8000",
+  "amnesia_api_key": "ak_YOUR_AMNESIA_API_KEY_HERE",
+  "target_db_uri": "sqlite:///relative/path/to/target_software.db",
+  "sync_interval_seconds": 60,
+  "writeback_interval_seconds": 300,
+  "tables_to_sync": [
+    {
+      "table_name": "posts",
+      "id_column": "id",
+      "content_column": "content",
+      "timestamp_column": "created_at",
+      "confidence": 1.0
+    },
+    {
+      "table_name": "notes",
+      "id_column": "id",
+      "content_column": "body",
+      "timestamp_column": "updated_at",
+      "confidence": 0.8
+    }
+  ]
+}

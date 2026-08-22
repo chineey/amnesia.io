@@ -35,13 +35,23 @@ Schedule this to ping your service **every 10 minutes** to keep it active and av
 ## 🔒 2. User Isolation & Local Storage
 
 ### If someone else visits my deployed link, will they see my memory?
-**No.** The application maintains strict isolation between individual visitors:
-1. **Unique user ID**: When a visitor opens the website, the frontend checks their browser's local storage. If no ID exists, it generates a unique random UUID (e.g. `c189bf74-56b2-4144-8b08-f24713d08507`) and saves it.
-2. **Database Queries**: Every request for profile facts or memories contains this UUID. The backend database retrieves only items belonging to that specific user ID.
-3. **Session Cache**: Active working history is cached in Redis using a key unique to the current session.
+**No.** The application enforces secure authentication and strict tenant isolation:
+1. **User Accounts & Sign In**: Visitors must register or log in using their email and password.
+2. **JWT Session Token**: Upon logging in, the backend issues a JSON Web Token (JWT) cryptographically signed with a server-side secret key. The token is saved in the browser's local storage under `amnesia_token`.
+3. **Secure Verification**: When the frontend requests memories or profile data, it passes the JWT token in the `Authorization` header. The backend validates this token to extract the user's secure UUID, querying only database records matching that user.
+4. **Session Cache**: The active chat thread is isolated in Redis using a session ID unique to that browser tab and session.
 
 ### Can my browser's local storage get full?
-**No.** Browser local storage supports up to 5MB–10MB of data. The React frontend only stores your `amnesia_user_id` string, which uses **less than 100 bytes**. Your actual episodic memories and core profile facts are stored on the server's cloud database (PostgreSQL), not in your browser.
+**No.** Browser local storage supports up to 5MB–10MB of data. The React frontend only stores your `amnesia_token` JWT string, which uses **less than 300 bytes**. Storing actual episodic memories and core profile facts is handled entirely on the server's PostgreSQL database, not in your browser.
+
+### How do I connect external applications (like GenPost) to my memory?
+Amnesia.io provides long-lived API keys for third-party integrations:
+1. In the application header, click **"Connect GenPost"** (or view your profile after signing up) to reveal your personal Amnesia API key (prefixed with `ak_`).
+2. Paste this API key into the target application's settings.
+3. The external app can then authenticate its calls to Amnesia endpoints (such as `GET /api/context` to retrieve profile facts, `POST /api/memory/ingest` to save memories, or `POST /api/profile/facts` to update core profile stats) by passing this key in its request headers.
+
+### Are integration API keys stored securely?
+**Yes.** The backend never stores API keys in plaintext. It stores only a SHA-256 hash (`api_key_hash`) of your key in the database. When an API call is made, the backend hashes the incoming key and compares it against the database hash. This means even if the database is compromised, your API keys cannot be recovered.
 
 ---
 
