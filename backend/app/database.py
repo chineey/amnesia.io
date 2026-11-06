@@ -132,6 +132,9 @@ async def init_db():
                 "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_api_key_hash_unique "
                 "ON users(api_key_hash) WHERE api_key_hash IS NOT NULL;"
             ))
+            await conn.execute(text(
+                "ALTER TABLE episodic_memories ADD COLUMN IF NOT EXISTS memory_type VARCHAR DEFAULT 'chat_turn';"
+            ))
         logger.info("PostgreSQL database successfully initialized.")
         USE_MOCK_DB = False
     except Exception as e:
@@ -159,12 +162,14 @@ def mock_add_memory(
     embedding: List[float],
     confidence: float = 1.0,
     access_count: int = 0,
-    source_session_id: uuid.UUID = None
+    source_session_id: uuid.UUID = None,
+    memory_type: str = "chat_turn"
 ) -> Dict[str, Any]:
     memory = {
         "id": uuid.uuid4(),
         "user_id": user_id,
         "content": content,
+        "memory_type": memory_type,
         "embedding": embedding,
         "confidence": confidence,
         "access_count": access_count,
@@ -176,7 +181,12 @@ def mock_add_memory(
     mock_memories.append(memory)
     return memory
 
-def mock_query_memories(user_id: uuid.UUID, query_embedding: List[float], limit: int = 5) -> List[Dict[str, Any]]:
+def mock_query_memories(
+    user_id: uuid.UUID,
+    query_embedding: List[float],
+    limit: int = 5,
+    max_distance: Optional[float] = None
+) -> List[Dict[str, Any]]:
     # Filter memories by user_id
     user_mems = [m for m in mock_memories if m["user_id"] == user_id]
     if not user_mems or not query_embedding:
@@ -193,17 +203,27 @@ def mock_query_memories(user_id: uuid.UUID, query_embedding: List[float], limit:
         if q_norm == 0 or m_norm == 0:
             score = 0.0
         else:
-            score = np.dot(m_vec, q_vec) / (m_norm * q_norm)
-        scored_memories.append((score, mem))
+            score = float(np.dot(m_vec, q_vec) / (m_norm * q_norm))
+        distance = 1.0 - score
+        if max_distance is not None and distance > max_distance:
+            continue
+        # Hybrid score weighting semantic similarity and confidence
+        confidence = float(mem.get("confidence", 1.0))
+        hybrid_score = (score * 0.85) + (confidence * 0.15)
+        mem_with_score = dict(mem)
+        mem_with_score["distance"] = distance
+        mem_with_score["similarity"] = score
+        scored_memories.append((hybrid_score, mem, mem_with_score))
         
-    # Order by similarity descending (closest first)
+    # Order by hybrid score descending (closest + highest confidence first)
     scored_memories.sort(key=lambda x: x[0], reverse=True)
     
-    # Take top-N and update access metadata
-    top_candidates = [item[1] for item in scored_memories[:limit]]
-    for cand in top_candidates:
-        cand["access_count"] += 1
-        cand["last_accessed_at"] = datetime.utcnow()
+    # Take top-N and update access metadata on original records
+    top_candidates = []
+    for _, orig_mem, mem_copy in scored_memories[:limit]:
+        orig_mem["access_count"] += 1
+        orig_mem["last_accessed_at"] = datetime.utcnow()
+        top_candidates.append(mem_copy)
         
     return top_candidates
 

@@ -39,9 +39,10 @@ def format_messages(messages: List[Dict[str, str]]):
             
     return contents, system_instruction
 
-async def get_embedding(text: str) -> List[float]:
+async def get_embedding(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> List[float]:
     """
     Generates a 768-dimensional embedding using Gemini's gemini-embedding-2 model.
+    Supports asymmetric task_type ('RETRIEVAL_DOCUMENT' vs 'RETRIEVAL_QUERY') for sharper RAG separation.
     Falls back to mock embeddings if API key is not configured.
     """
     if not is_api_configured():
@@ -57,7 +58,10 @@ async def get_embedding(text: str) -> List[float]:
             response = await client.aio.models.embed_content(
                 model="gemini-embedding-2",
                 contents=text,
-                config=types.EmbedContentConfig(output_dimensionality=768)
+                config=types.EmbedContentConfig(
+                    output_dimensionality=768,
+                    task_type=task_type,
+                )
             )
             return response.embeddings[0].values
         except Exception as e:
@@ -67,6 +71,10 @@ async def get_embedding(text: str) -> List[float]:
                 import asyncio
                 await asyncio.sleep(delay)
                 delay *= 2
+            elif any(k in err_str for k in ("SSL", "EOF", "Connection", "Timeout", "timeout", "503", "502", "500")) and attempt < retries - 1:
+                logger.warning(f"Transient error calling Gemini Embedding API. Retrying in 1.5s (Attempt {attempt+1}/{retries})... Error: {e}")
+                import asyncio
+                await asyncio.sleep(1.5)
             else:
                 logger.error(f"Error calling Gemini Embedding API: {e}. Falling back to mock.")
                 random.seed(hash(text))

@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     # work out of the box, but this must be overridden on any real deployment.
     jwt_secret: str = "dev-insecure-jwt-secret-change-me"
 
+    # RAG retrieval & filtering settings
+    rag_max_cosine_distance: float = 0.48
+    rag_chat_max_cosine_distance: float = 0.52
+    rag_profile_min_similarity: float = 0.54
+    rag_rerank_enabled: bool = True
+
     port: int = 8000
     host: str = "127.0.0.1"
 

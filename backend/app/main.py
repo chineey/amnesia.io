@@ -97,6 +97,7 @@ async def get_memories(user_id: uuid.UUID = Depends(get_current_user_id), db: As
             {
                 "id": str(m["id"]),
                 "content": m["content"],
+                "memory_type": m.get("memory_type", "chat_turn"),
                 "confidence": m["confidence"],
                 "access_count": m["access_count"],
                 "ttl": m["ttl"].isoformat() if m["ttl"] else None,
@@ -119,6 +120,7 @@ async def get_memories(user_id: uuid.UUID = Depends(get_current_user_id), db: As
         {
             "id": str(m.id),
             "content": m.content,
+            "memory_type": getattr(m, "memory_type", "chat_turn"),
             "confidence": m.confidence,
             "access_count": m.access_count,
             "ttl": m.ttl.isoformat() if m.ttl else None,

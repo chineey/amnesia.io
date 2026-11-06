@@ -36,8 +36,8 @@ async def execute_path_a_turn_embedding(
     content = f"User: {user_msg}\nAssistant: {assistant_msg}"
     
     try:
-        # Get embedding
-        embedding = await get_embedding(content)
+        # Get document embedding for storage
+        embedding = await get_embedding(content, task_type="RETRIEVAL_DOCUMENT")
         
         if is_mock_db():
             mock_add_memory(
@@ -46,7 +46,8 @@ async def execute_path_a_turn_embedding(
                 embedding=embedding,
                 confidence=1.0,
                 access_count=1,
-                source_session_id=session_id
+                source_session_id=session_id,
+                memory_type="chat_turn"
             )
             logger.info("Path A completed (Mock DB).")
             return
@@ -55,6 +56,7 @@ async def execute_path_a_turn_embedding(
             new_memory = EpisodicMemory(
                 user_id=user_id,
                 content=content,
+                memory_type="chat_turn",
                 embedding=embedding,
                 confidence=1.0,
                 access_count=1,
@@ -86,12 +88,14 @@ async def execute_path_b_session_extraction(
         
         transcript = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in history])
         
-        # 2. Call Gemini for extraction
+        # 2. Call Gemini/Groq for extraction
         extraction_prompt = (
             "Given this conversation transcript, return JSON only with keys:\n"
-            '  "facts": [{"content": str, "confidence": float}],\n'
-            '  "preferences": [{"content": str, "confidence": float}],\n'
-            '  "events": [{"content": str, "confidence": float}]\n'
+            '  "facts": [{"content": str, "confidence": float, "category": str}],\n'
+            '  "preferences": [{"content": str, "confidence": float, "category": str}],\n'
+            '  "events": [{"content": str, "confidence": float, "category": str}]\n'
+            "For 'category', use one of: 'voice' (tone, slang, communication style), "
+            "'identity' (name, role, occupation, age), or 'topic' (specific interests, tech, food, hobbies, events).\n"
             "No explanation, no markdown. JSON only.\n\n"
             f"Transcript:\n{transcript}"
         )
@@ -146,12 +150,14 @@ async def execute_path_b_session_extraction(
             "events": combined_events
         }
 
-        # 4. Run Contradiction Resolution Pass via Gemini
+        # 4. Run Contradiction Resolution Pass via Groq
         contradiction_prompt = (
             "You are a profile manager. Given the user's current profile JSON "
             "and today's new facts/preferences, identify any logical contradictions, resolve them "
             "with the most recent information, and return the corrected, consolidated profile as "
-            "valid JSON only. Consolidate duplicates and merge related items. Keep confidence scores between 0.0 and 1.0.\n"
+            "valid JSON only. Consolidate duplicates and merge related items. Keep confidence scores between 0.0 and 1.0, "
+            "and preserve or assign a 'category' ('voice', 'identity', or 'topic') on each item.\n"
+            "IMPORTANT: Do not merge unrelated domains into a single sentence (e.g. keep occupation separate from food/hobby preferences).\n"
             "Return JSON with keys: 'facts', 'preferences', and 'events'.\n"
             "No explanation, no markdown. JSON only.\n\n"
             f"Combined Profile Input:\n{json.dumps(merged_temp_profile, indent=2)}"
@@ -179,7 +185,7 @@ async def execute_path_b_session_extraction(
         # sequential embedding API calls.
         valid_events = [e for e in new_events if e.get("content")]
         event_embeddings = await asyncio.gather(
-            *[get_embedding(e["content"]) for e in valid_events]
+            *[get_embedding(e["content"], task_type="RETRIEVAL_DOCUMENT") for e in valid_events]
         ) if valid_events else []
 
         # 6. Commit the resolved profile and the new event memories in a
@@ -193,7 +199,8 @@ async def execute_path_b_session_extraction(
                     embedding=embedding,
                     confidence=event.get("confidence", 1.0),
                     access_count=0,
-                    source_session_id=session_id
+                    source_session_id=session_id,
+                    memory_type="event"
                 )
             logger.info(
                 f"Path B updated Core Profile and saved {len(valid_events)} "
@@ -210,6 +217,7 @@ async def execute_path_b_session_extraction(
                     db.add(EpisodicMemory(
                         user_id=user_id,
                         content=event["content"],
+                        memory_type="event",
                         embedding=embedding,
                         confidence=event.get("confidence", 1.0),
                         access_count=0,

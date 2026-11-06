@@ -31,6 +31,7 @@ async def context(
 class IngestMemoryRequest(BaseModel):
     content: str
     confidence: float = 1.0
+    memory_type: str = "post_sample"
 
 
 @router.post("/memory/ingest")
@@ -48,13 +49,20 @@ async def ingest_memory(
     if not content:
         return {"status": "skipped", "reason": "empty content"}
 
-    await ingest_episodic_memory(user_id, content, db, confidence=request.confidence)
+    await ingest_episodic_memory(
+        user_id,
+        content,
+        db,
+        confidence=request.confidence,
+        memory_type=request.memory_type,
+    )
     return {"status": "ok"}
 
 
 class ProfileFact(BaseModel):
     content: str
     confidence: float = 1.0
+    category: Optional[str] = None
 
 
 class ProfileFactsRequest(BaseModel):
