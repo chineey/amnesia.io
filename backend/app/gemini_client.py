@@ -95,17 +95,42 @@ def get_groq_client():
         base_url="https://api.groq.com/openai/v1"
     )
 
+async def _gemini_chat_fallback(
+    messages: List[Dict[str, str]],
+    temperature: float = 0.7,
+    max_tokens: int = 1000,
+) -> str:
+    if not is_api_configured():
+        return f"[Mock Groq Response] Groq/Gemini API Key not configured. Prompt details: {messages[-1]['content'][:100]}..."
+    try:
+        client = get_client()
+        contents, system_instruction = format_messages(messages)
+        config = types.GenerateContentConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+            system_instruction=system_instruction,
+        )
+        resp = await client.aio.models.generate_content(
+            model=settings.gemini_model,
+            contents=contents,
+            config=config,
+        )
+        return resp.text or ""
+    except Exception as e:
+        logger.error(f"Gemini fallback also failed: {e}")
+        return f"[Mock Groq Response - Fallback] I received your message. (Error: {e}). Prompt details: {messages[-1]['content'][:100]}..."
+
 async def get_chat_completion(
     messages: List[Dict[str, str]], 
     temperature: float = 0.7,
     max_tokens: int = 1000
 ) -> str:
     """
-    Queries Groq for non-streaming response.
+    Queries Groq for non-streaming response, falling back to Gemini if Groq is unconfigured or errors.
     """
     if not is_groq_configured():
-        logger.warning("GROQ_API_KEY not configured. Returning mock response.")
-        return f"[Mock Groq Response] Groq API Key not configured. Prompt details: {messages[-1]['content'][:100]}..."
+        logger.warning("GROQ_API_KEY not configured. Falling back to Gemini.")
+        return await _gemini_chat_fallback(messages, temperature=temperature, max_tokens=max_tokens)
 
     retries = 3
     delay = 15
@@ -127,11 +152,11 @@ async def get_chat_completion(
                 await asyncio.sleep(delay)
                 delay *= 2
             else:
-                logger.error(f"Error calling Groq API: {e}. Falling back to mock response.")
-                return f"[Mock Groq Response - Fallback] I received your message. (Error: {e}). Prompt details: {messages[-1]['content'][:100]}..."
+                logger.warning(f"Error calling Groq API ({e}). Falling back to Gemini.")
+                return await _gemini_chat_fallback(messages, temperature=temperature, max_tokens=max_tokens)
                 
-    logger.warning("Groq API rate limit exceeded. Falling back to mock response.")
-    return f"[Mock Groq Response - Rate Limit Fallback] Groq API rate limit exceeded. Prompt details: {messages[-1]['content'][:100]}..."
+    logger.warning("Groq API rate limit exceeded. Falling back to Gemini.")
+    return await _gemini_chat_fallback(messages, temperature=temperature, max_tokens=max_tokens)
 
 async def get_chat_completion_stream(
     messages: List[Dict[str, str]], 
@@ -139,15 +164,15 @@ async def get_chat_completion_stream(
     max_tokens: int = 1000
 ) -> AsyncGenerator[str, None]:
     """
-    Queries Groq for streaming response.
+    Queries Groq for streaming response, falling back to Gemini if Groq is unconfigured or errors.
     """
     if not is_groq_configured():
-        logger.warning("GROQ_API_KEY not configured. Streaming mock response.")
-        mock_resp = f"[Mock Groq Stream] Hello! Since your GROQ_API_KEY is not configured in .env, I am responding in offline mock mode."
-        for word in mock_resp.split(" "):
+        logger.warning("GROQ_API_KEY not configured. Falling back to Gemini for stream.")
+        text = await _gemini_chat_fallback(messages, temperature=temperature, max_tokens=max_tokens)
+        for word in text.split(" "):
             yield word + " "
             import asyncio
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.02)
         return
 
     retries = 3
@@ -177,20 +202,20 @@ async def get_chat_completion_stream(
                     delay *= 2
                     continue
                 else:
-                    logger.warning("Groq API stream rate limit exceeded. Falling back to mock streaming.")
-                    mock_resp = f"[Mock Groq Stream - Rate Limit Fallback] Hello! Since your Groq API key has exceeded its quota, I am responding in offline mock mode."
-                    for word in mock_resp.split(" "):
+                    logger.warning("Groq API stream rate limit exceeded. Falling back to Gemini.")
+                    text = await _gemini_chat_fallback(messages, temperature=temperature, max_tokens=max_tokens)
+                    for word in text.split(" "):
                         yield word + " "
                         import asyncio
-                        await asyncio.sleep(0.05)
+                        await asyncio.sleep(0.02)
                     return
             else:
-                logger.error(f"Error calling Groq API Stream: {e}. Falling back to mock streaming.")
-                mock_resp = f"[Mock Groq Stream - Fallback] Hello! Since there was an error calling the Groq API ({e}), I am responding in offline mock mode."
-                for word in mock_resp.split(" "):
+                logger.warning(f"Error calling Groq API Stream ({e}). Falling back to Gemini.")
+                text = await _gemini_chat_fallback(messages, temperature=temperature, max_tokens=max_tokens)
+                for word in text.split(" "):
                     yield word + " "
                     import asyncio
-                    await asyncio.sleep(0.05)
+                    await asyncio.sleep(0.02)
                 return
 
 

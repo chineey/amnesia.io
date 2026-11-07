@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     
     groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "openai/gpt-oss-120b"
     
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/amnesia"
     database_url_sync: str = "postgresql://postgres:postgres@localhost:5432/amnesia"
