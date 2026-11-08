@@ -8,7 +8,10 @@ from backend.app.config import settings
 logger = logging.getLogger("amnesia.gemini")
 
 def get_client() -> genai.Client:
-    return genai.Client(api_key=settings.gemini_api_key)
+    return genai.Client(
+        api_key=settings.gemini_api_key,
+        http_options=types.HttpOptions(api_version="v1beta")
+    )
 
 def is_api_configured() -> bool:
     key = settings.gemini_api_key
@@ -120,6 +123,32 @@ async def _gemini_chat_fallback(
         logger.error(f"Gemini fallback also failed: {e}")
         return f"[Mock Groq Response - Fallback] I received your message. (Error: {e}). Prompt details: {messages[-1]['content'][:100]}..."
 
+GROQ_FALLBACK_MODELS = ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "llama-3.3-70b-versatile"]
+
+async def _groq_create_with_model_fallback(client, messages, temperature, max_tokens, stream=False):
+    """
+    Tries the configured model first; if 404/model_not_found, tries known alternative Groq models.
+    """
+    models_to_try = [settings.groq_model] + [m for m in GROQ_FALLBACK_MODELS if m != settings.groq_model]
+    last_err = None
+    for model_name in models_to_try:
+        try:
+            return await client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=stream
+            )
+        except Exception as e:
+            err_str = str(e)
+            if "404" in err_str or "model_not_found" in err_str or "does not exist" in err_str:
+                logger.warning(f"Groq model '{model_name}' not available on this account. Trying next fallback...")
+                last_err = e
+                continue
+            raise e
+    raise last_err
+
 async def get_chat_completion(
     messages: List[Dict[str, str]], 
     temperature: float = 0.7,
@@ -137,11 +166,12 @@ async def get_chat_completion(
     for attempt in range(retries):
         try:
             client = get_groq_client()
-            response = await client.chat.completions.create(
-                model=settings.groq_model,
+            response = await _groq_create_with_model_fallback(
+                client=client,
                 messages=messages,
                 temperature=temperature,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
+                stream=False
             )
             return response.choices[0].message.content or ""
         except Exception as e:
@@ -180,8 +210,8 @@ async def get_chat_completion_stream(
     for attempt in range(retries):
         try:
             client = get_groq_client()
-            response_stream = await client.chat.completions.create(
-                model=settings.groq_model,
+            response_stream = await _groq_create_with_model_fallback(
+                client=client,
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,

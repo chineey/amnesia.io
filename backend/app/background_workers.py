@@ -15,12 +15,40 @@ logger = logging.getLogger("amnesia.background")
 
 def clean_json_response(raw_text: str) -> str:
     """
-    Cleans markdown wrappers (like ```json ... ```) from Gemini outputs to get raw JSON text.
+    Cleans markdown wrappers (like ```json ... ```) from LLM outputs to get raw JSON text.
     """
     # Remove markdown code blocks
     cleaned = re.sub(r"^```[a-zA-Z]*\s*", "", raw_text, flags=re.MULTILINE)
     cleaned = re.sub(r"```\s*$", "", cleaned, flags=re.MULTILINE)
     return cleaned.strip()
+
+def safe_parse_json(raw_text: str, default: Any = None) -> Any:
+    """
+    Parses JSON with self-healing recovery if the response was truncated mid-stream by token limit.
+    """
+    if default is None:
+        default = {"facts": [], "preferences": [], "events": []}
+    if not raw_text or not raw_text.strip():
+        return default
+
+    cleaned = clean_json_response(raw_text)
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        # Attempt repair for truncated JSON array/object
+        last_brace = cleaned.rfind("}")
+        if last_brace != -1:
+            sub = cleaned[:last_brace + 1]
+            open_sq = sub.count("[") - sub.count("]")
+            open_cur = sub.count("{") - sub.count("}")
+            candidate = sub + ("]" * max(0, open_sq)) + ("}" * max(0, open_cur))
+            try:
+                repaired = json.loads(candidate)
+                logger.info("Successfully repaired truncated JSON from LLM response.")
+                return repaired
+            except Exception:
+                pass
+    return default
 
 async def execute_path_a_turn_embedding(
     user_id: uuid.UUID,
@@ -168,17 +196,12 @@ async def execute_path_b_session_extraction(
                 {"role": "system", "content": "You are a profile manager. Return JSON only. No explanation, no markdown."},
                 {"role": "user", "content": contradiction_prompt}
             ],
-            temperature=0.1
+            temperature=0.1,
+            max_tokens=4000
         )
         
         logger.debug(f"Raw contradiction resolution response: {raw_resolved}")
-        
-        try:
-            resolved_json_str = clean_json_response(raw_resolved)
-            resolved_profile = json.loads(resolved_json_str)
-        except Exception as json_err:
-            logger.error(f"Failed to parse resolved profile JSON: {json_err}. Keeping combined data.")
-            resolved_profile = merged_temp_profile
+        resolved_profile = safe_parse_json(raw_resolved, default=merged_temp_profile)
             
         # 5. Generate event embeddings concurrently, ahead of the write
         # transaction, so the DB connection isn't held open across N
