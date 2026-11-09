@@ -354,14 +354,21 @@ async def _filter_and_rerank_writing_context(
                     {"role": "user", "content": rerank_prompt},
                 ],
                 temperature=0.0,
-                max_tokens=700,
+                max_tokens=2000,
             )
-            if not raw_resp.startswith("[Mock Groq"):
-                parsed = json.loads(_clean_json_block(raw_resp))
-                voice_traits = [str(x).strip() for x in parsed.get("voice_traits", []) if str(x).strip()]
-                topic_facts = [str(x).strip() for x in parsed.get("topic_facts", []) if str(x).strip()]
-                filtered_snippets = [str(x).strip() for x in parsed.get("episodic_snippets", []) if str(x).strip()]
-                return voice_traits, topic_facts, filtered_snippets, True
+            cleaned = _clean_json_block(raw_resp) if raw_resp else ""
+            if cleaned and not raw_resp.startswith("[Mock Groq"):
+                try:
+                    parsed = json.loads(cleaned)
+                except Exception:
+                    from backend.app.background_workers import safe_parse_json
+                    parsed = safe_parse_json(cleaned, default={})
+
+                if isinstance(parsed, dict) and any(k in parsed for k in ("voice_traits", "topic_facts", "episodic_snippets")):
+                    voice_traits = [str(x).strip() for x in parsed.get("voice_traits", []) if str(x).strip()]
+                    topic_facts = [str(x).strip() for x in parsed.get("topic_facts", []) if str(x).strip()]
+                    filtered_snippets = [str(x).strip() for x in parsed.get("episodic_snippets", []) if str(x).strip()]
+                    return voice_traits, topic_facts, filtered_snippets, True
         except Exception as e:
             logger.warning(f"Groq RAG reranker failed, falling back to semantic/lexical filter: {e}")
 

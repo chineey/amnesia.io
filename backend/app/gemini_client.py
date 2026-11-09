@@ -123,7 +123,7 @@ async def _gemini_chat_fallback(
         logger.error(f"Gemini fallback also failed: {e}")
         return f"[Mock Groq Response - Fallback] I received your message. (Error: {e}). Prompt details: {messages[-1]['content'][:100]}..."
 
-GROQ_FALLBACK_MODELS = ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "llama-3.3-70b-versatile"]
+GROQ_FALLBACK_MODELS = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "llama-3.3-70b-versatile"]
 
 async def _groq_create_with_model_fallback(client, messages, temperature, max_tokens, stream=False):
     """

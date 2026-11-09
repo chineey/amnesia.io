@@ -35,10 +35,17 @@ def safe_parse_json(raw_text: str, default: Any = None) -> Any:
     try:
         return json.loads(cleaned)
     except Exception:
-        # Attempt repair for truncated JSON array/object
-        last_brace = cleaned.rfind("}")
+        pass
+
+    # Attempt repair for truncated JSON array/object:
+    # 1. Strip trailing incomplete attributes like '"confidence": 0.' or trailing commas
+    fixed = re.sub(r',\s*"[a-zA-Z0-9_]+":\s*[^,}\]]*$', '', cleaned.strip())
+    fixed = re.sub(r',\s*$', '', fixed)
+    # 2. Try closing open objects/arrays
+    for candidate_src in [fixed + "}", fixed, cleaned]:
+        last_brace = candidate_src.rfind("}")
         if last_brace != -1:
-            sub = cleaned[:last_brace + 1]
+            sub = candidate_src[:last_brace + 1]
             open_sq = sub.count("[") - sub.count("]")
             open_cur = sub.count("{") - sub.count("}")
             candidate = sub + ("]" * max(0, open_sq)) + ("}" * max(0, open_cur))
@@ -47,7 +54,8 @@ def safe_parse_json(raw_text: str, default: Any = None) -> Any:
                 logger.info("Successfully repaired truncated JSON from LLM response.")
                 return repaired
             except Exception:
-                pass
+                continue
+
     return default
 
 async def execute_path_a_turn_embedding(
